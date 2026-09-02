@@ -16,7 +16,19 @@
 - 반복 실행 시 중복되지 않는 적재 구조
 - 챗봇 품질 상태를 정량적으로 분석할 수 있는 지표 구성
 
-이를 개선하기 위해 `Excel → Pandas → PostgreSQL → SQL 분석` 흐름으로 QA 데이터 처리 구조를 구현했습니다.
+이를 개선하기 위해
+
+Playwright
+    ↓
+Google Sheets
+    ↓
+Python / Pandas
+    ↓
+PostgreSQL
+    ↓
+SQL 분석
+    ↓
+QA 개선 흐름으로 QA 데이터 처리 구조를 구현했습니다.
 
 ## 데이터 처리 흐름
 

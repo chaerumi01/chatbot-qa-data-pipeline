@@ -6,6 +6,36 @@
 
 ---
 
+## 공개 범위
+
+이 저장소는 QA 데이터의 검증·적재·분석에 필요한 코드와 SQL을 공개합니다.
+
+| 구분 | 공개 여부 | 비고 |
+|---|---|---|
+| 데이터 검증 / 중복 검사 | 공개 | `dedup_check.py`, `inspect_test_data.py` |
+| PostgreSQL 스키마 / 적재 | 공개 | `sql/00_schema.sql`, `load_chatbot_test.py` |
+| SQL 품질 KPI 분석 | 공개 | `sql/01_quality_kpi.sql` |
+| 운영 자동 수집 / Google Sheets 연동 | 비공개 | 운영 환경 및 인증정보 관련 설정을 포함하여 제외 |
+| 실제 QA 데이터 | 비공개 | 업무 데이터로 저장소에 포함하지 않음 |
+
+실제 업무 데이터와 인증정보는 공개 저장소에 포함하지 않았으며, 자동 수집 및 운영 연동 코드는 공개 가능한 범위와 분리했습니다.
+
+---
+
+## 핵심 결과
+
+| Batch | Collection Success | DB Coverage | Answer Accuracy | Evaluation Progress |
+|---|---:|---:|---:|---:|
+| 2026-07 | 100.00% | 65.70% | 85.71% | 88.05% |
+| 2026-08 | 100.00% | 59.20% | 산출 전 | 0.00% |
+
+- 챗봇 품질을 하나의 성공률로 합치지 않고 **DB Coverage와 Answer Accuracy로 분리**하여 분석했습니다.
+- 2026-08 Answer Accuracy는 `0%`가 아닌 **산출 전(NULL)** 으로 처리하여 미평가 데이터가 품질지표를 왜곡하지 않도록 했습니다.
+- 초기 KPI에서 `NO_MATCH`에 자동 기록된 `FAIL`이 사람의 평가 완료 건으로 집계되면서 Evaluation Progress가 실제보다 높게 계산되는 문제를 발견했습니다.
+- 원천 데이터의 `chatbot_result`와 `evaluation`을 교차 검증하여 원인을 확인하고, **응답 가능 여부와 답변 품질을 분리하도록 KPI 정의와 SQL 집계 로직을 수정**했습니다.
+
+---
+
 ## 1. 프로젝트 배경
 
 챗봇 품질검사 업무에서는 반복적인 테스트를 통해 질문, 챗봇 답변, 평가 결과가 지속적으로 생성됩니다.
@@ -123,7 +153,7 @@ Google Sheets는 사람이 테스트 결과를 확인하고 판정하는 운영 
 
 또한 사람의 평가 결과에 따라 후속 조치 관리 시트로 데이터가 이어지도록 구성했습니다.
 
-예를 들어 다음과 같은 품질 판정이 발생하면
+예를 들어 다음과 같은 품질 판정이 발생하면:
 
 ```text
 evaluation      = FAIL
@@ -211,17 +241,17 @@ Exact 비교만으로 판단하기 어려운 질문은 RapidFuzz를 이용해 �
 동일한 원본 데이터로 적재 스크립트를 다시 실행하여 멱등성을 확인했습니다.
 
 ```text
-원본 데이터             977건
+원본 데이터              977건
         ↓
-검증 후 적재 대상        976건
+검증 후 적재 대상         976건
         ↓
-PostgreSQL 최초 적재     976건
+PostgreSQL 최초 적재      976건
         ↓
 동일 데이터 재실행
         ↓
-신규 INSERT                0건
+신규 INSERT                 0건
         ↓
-PostgreSQL 최종          976건
+PostgreSQL 최종           976건
 ```
 
 - 최초 적재: **976건**
@@ -247,15 +277,18 @@ PostgreSQL 최종          976건
 | Foreign Key | `retest_of_test_id → test_id` | 재검사 데이터 연결을 고려한 구조 |
 | INDEX | `(batch_id, evaluation)`, `category` | 월별 품질 및 카테고리 분석 지원 |
 
-`evaluation`은 다음 상태를 기준으로 관리합니다.
+`evaluation` 컬럼의 DB 제약조건은 다음 상태를 허용하도록 구성했습니다.
 
 ```text
-PASS    : 답변 정상
-FAIL    : 답변 오류
-REVIEW  : 추가 확인이 필요한 판정 보류
+PASS
+PARTIAL
+FAIL
+REVIEW
 ```
 
-`REVIEW`는 평가가 완료된 상태로 간주하지 않으며 Answer Accuracy와 Evaluation Progress의 평가 완료 건수에서 제외합니다.
+`PARTIAL`도 DB 제약조건상 허용되지만, 현재 KPI에서는 `PASS`, `FAIL`을 평가 완료 상태로 사용합니다.
+
+`REVIEW`는 판정 보류 상태로 간주하며 Answer Accuracy와 Evaluation Progress의 평가 완료 건수에서 제외합니다.
 
 또한 `collection_status`를 별도로 관리하여 다음 두 상황을 구분했습니다.
 
@@ -522,6 +555,7 @@ chatbot_qa_dedup/
 ├── data/                       # 원본/처리 데이터 (Git 제외)
 │
 ├── sql/
+│   ├── 00_schema.sql           # PostgreSQL 테이블 및 제약조건 정의
 │   └── 01_quality_kpi.sql      # 챗봇 품질 KPI 분석 SQL
 │
 ├── .gitignore

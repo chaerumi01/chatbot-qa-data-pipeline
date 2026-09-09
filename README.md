@@ -61,7 +61,7 @@
 
 Google Sheets는 사람이 응답을 확인하고 판정하는 **운영 인터페이스**, PostgreSQL은 검증된 테스트 결과를 저장하고 반복 가능한 SQL 분석을 수행하는 **분석용 저장소**로 사용했습니다. 신규 QA 중복 검증과 테스트 결과 적재는 별도 스크립트로 처리합니다.
 
-이 저장소에는 **데이터 검증·중복 검사·후처리·PostgreSQL 적재·SQL 분석 코드**를 공개했습니다. Playwright 자동질의와 Google Sheets 연동은 운영 서비스의 접근 경로 및 내부 데이터와 연결되어 전체 운영 코드를 포함하지 않았습니다. 아래 자동 수집 및 E2E 검증 내용은 해당 운영 환경에서 수행한 작업을 설명합니다.
+이 저장소에는 **데이터 검증·중복 검사·후처리·PostgreSQL 스키마 및 적재·SQL 분석 코드**를 공개했습니다. Playwright 자동질의와 Google Sheets 연동은 운영 서비스의 접근 경로 및 내부 데이터와 연결되어 전체 운영 코드를 포함하지 않았습니다. 아래 자동 수집 및 E2E 검증 내용은 해당 운영 환경에서 수행한 작업을 설명합니다.
 
 ## 4. 자동 수집과 Human-in-the-loop 운영
 
@@ -168,7 +168,7 @@ MASTER 헤더를 검증하고 `test_id`로 기존 수집 여부를 확인하여 
 
 Sheets의 수집 중복 확인 키는 `test_id`, PostgreSQL 적재 중복 확인 키는 `(batch_id, question)`입니다. 현재 DB 구조에서는 같은 질문을 별도 배치로 재검사할 수 있지만, 동일 배치에 같은 질문을 여러 번 저장할 수는 없습니다.
 
-`retest_of_test_id`는 Before / After 비교를 위한 설계이며 현재 적재 스크립트는 이 값을 비워 둡니다. 테이블 생성 DDL은 저장소에 포함되어 있지 않으므로, 적재 전 실제 테이블의 컬럼과 평가 허용값을 포함한 제약조건을 준비해야 합니다.
+`retest_of_test_id`는 Before / After 비교를 위한 설계이며 현재 적재 스크립트는 이 값을 비워 둡니다. 테이블과 제약조건은 [sql/00_schema.sql](sql/00_schema.sql)에 정의되어 있습니다. `evaluation`의 CHECK 제약조건은 NULL 또는 `PASS`, `PARTIAL`, `FAIL`, `REVIEW`를 허용합니다.
 
 ## 7. 품질 KPI 설계와 분석
 
@@ -238,6 +238,7 @@ Evaluation Progress = (360 + 60) / 477  = 88.05%
 chatbot_qa_dedup/
 ├── data/                      # 업무 원본·처리 데이터 (Git 제외)
 ├── sql/
+│   ├── 00_schema.sql           # PostgreSQL 테이블·제약조건·인덱스 정의
 │   └── 01_quality_kpi.sql      # 품질 KPI 및 실패 유형 분석
 ├── .gitignore
 ├── dedup_check.py              # 신규 QA 중복 검증 및 사람 판정 반영
@@ -251,7 +252,7 @@ chatbot_qa_dedup/
 
 ## 9. 실행 안내
 
-공개 코드는 내부 입력 파일과 기존 PostgreSQL 테이블을 사용하는 스크립트입니다. 원본 데이터, 테이블 생성 DDL, 운영 자동화 코드는 포함되어 있지 않으므로 저장소만으로 전체 운영 흐름이 바로 실행되지는 않습니다.
+공개 코드는 내부 입력 파일과 기존 PostgreSQL 테이블을 사용하는 스크립트입니다. 원본 데이터와 운영 자동화 코드는 포함되어 있지 않으므로 저장소만으로 전체 운영 흐름이 바로 실행되지는 않습니다.
 
 ### 환경 준비
 
@@ -291,7 +292,7 @@ test_id, batch_id, source_type, category, question, answer_raw,
 chatbot_result, evaluation, failure_type, action_required, note
 ```
 
-입력의 `batch_id`는 Pandas에서 날짜로 변환할 수 있어야 합니다. 현재 DB 연결 대상은 `localhost:5432`, DB명은 `chatbot_qa`, 사용자는 `postgres`입니다. 앞서 설명한 `chatbot_test` 테이블을 먼저 준비해야 합니다.
+입력의 `batch_id`는 Pandas에서 날짜로 변환할 수 있어야 합니다. 현재 DB 연결 대상은 `localhost:5432`, DB명은 `chatbot_qa`, 사용자는 `postgres`입니다. DB를 준비한 뒤 [sql/00_schema.sql](sql/00_schema.sql)을 실행하여 `chatbot_test` 테이블을 생성합니다. 이 SQL은 최초 생성용이며 이미 테이블이 있는 DB에 반복 실행하는 마이그레이션 스크립트는 아닙니다.
 
 ```bash
 python inspect_test_data.py
@@ -312,7 +313,7 @@ PostgreSQL 클라이언트에서 [sql/01_quality_kpi.sql](sql/01_quality_kpi.sql
 
 데이터 처리 측면의 다음 개선 대상은 다음과 같습니다.
 
-- 입력 스키마와 DB 생성 DDL 제공을 통한 실행 재현성 개선
+- 입력 파일의 컬럼·타입 명세와 비식별 샘플 제공을 통한 실행 재현성 개선
 - 이미 적재한 평가값의 갱신 정책 및 `ON CONFLICT` 기반 적재 처리
 - 실제 수집 시각과 성공·실패 시도 로그를 보존하는 적재 구조
 - `retest_of_test_id`를 활용한 수정 전후 평가 이력 연결
